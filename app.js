@@ -6,31 +6,47 @@ document.documentElement.className += ' js';
   'use strict';
   var motionOK = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  /* Two mirrored sets of 36 generated SVG paths: a faint static set + an
-     animated "drawing" copy, looping every 18s. Original geometry (seeded). */
+  /* FloatingPaths: two mirrored sets (position = +1 and -1) of 36 deterministic
+     cubic-bezier paths, identical to the React reference. Each path has its
+     own strokeWidth and strokeOpacity set inline; the CSS .fp-path animation
+     drives the flowing dash + pulsing opacity loop. */
   var svg = document.getElementById('bgPaths');
   if (svg) {
     var NS = 'http://www.w3.org/2000/svg';
-    var rnd = (function (a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })(20261005);
-    var base = document.createElementNS(NS, 'g'), anim = document.createElementNS(NS, 'g');
-    var W = 1600, N = 36, i, s;
-    for (i = 0; i < N; i++) {
-      var y = 70 + 760 * (i / (N - 1)) + (rnd() - 0.5) * 24;
-      var amp = 20 + rnd() * 56;
-      var segs = 5 + Math.floor(rnd() * 4);
-      var dir = rnd() > 0.5 ? 1 : -1;
-      var seg = (W + 160) / segs, x = -80, a = amp * dir, d = 'M -80 ' + y.toFixed(1);
-      for (s = 0; s < segs; s++) {
-        d += ' C ' + (x + seg * .33).toFixed(1) + ' ' + (y + a).toFixed(1) + ' ' + (x + seg * .66).toFixed(1) + ' ' + (y - a).toFixed(1) + ' ' + (x + seg).toFixed(1) + ' ' + y.toFixed(1);
-        x += seg; a = amp * (.55 + rnd() * .45) * (a > 0 ? -1 : 1);
+    var N = 36;
+
+    function addPaths(position) {
+      for (var i = 0; i < N; i++) {
+        var a = 380 - i * 5 * position;
+        var b = 189 + i * 6;
+        var c = 312 - i * 5 * position;
+        var d2 = 216 - i * 6;
+        var e = 152 - i * 5 * position;
+        var f = 343 - i * 6;
+        var g = 616 - i * 5 * position;
+        var h = 470 - i * 6;
+        var j = 684 - i * 5 * position;
+        var k = 875 - i * 6;
+        var d = 'M-' + a + ' -' + b +
+                'C-' + a + ' -' + b + ' -' + c + ' ' + d2 + ' ' + e + ' ' + f +
+                'C' + g + ' ' + h + ' ' + j + ' ' + k + ' ' + j + ' ' + k;
+        var p = document.createElementNS(NS, 'path');
+        p.setAttribute('d', d);
+        p.setAttribute('pathLength', '1');
+        p.setAttribute('class', 'fp-path');
+        p.setAttribute('stroke-width', (0.5 + i * 0.03).toFixed(3));
+        p.setAttribute('stroke-opacity', (0.1 + i * 0.03).toFixed(3));
+        if (motionOK) {
+          var dur = 20 + Math.random() * 10;
+          p.style.animationDuration = dur.toFixed(2) + 's';
+          p.style.animationDelay = (-Math.random() * dur).toFixed(2) + 's';
+        }
+        svg.appendChild(p);
       }
-      var pb = document.createElementNS(NS, 'path');
-      pb.setAttribute('d', d); pb.setAttribute('pathLength', '1'); pb.setAttribute('class', 'path-base'); base.appendChild(pb);
-      var pa = document.createElementNS(NS, 'path');
-      pa.setAttribute('d', d); pa.setAttribute('pathLength', '1'); pa.setAttribute('class', 'path-anim');
-      pa.style.animationDelay = (-(i * 0.53) % 18).toFixed(2) + 's'; anim.appendChild(pa);
     }
-    svg.appendChild(base); svg.appendChild(anim);
+    addPaths(1);
+    addPaths(-1);
+
     /* Pause the animation when the hero is off-screen (performance NFR). */
     if ('IntersectionObserver' in window) {
       new IntersectionObserver(function (es) { svg.classList.toggle('paused', !es[0].isIntersecting); }).observe(document.querySelector('.hero'));
