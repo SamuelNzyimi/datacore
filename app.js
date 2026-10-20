@@ -1,81 +1,59 @@
 document.documentElement.className += ' js';
 
-/* Hero visual: background paths + letter-by-letter title reveal (FR-2).
-   Runs immediately at parse so there is no flash of un-animated content. */
+/* Hero visual: WebGL glass folds (FR-2). */
 (function () {
   'use strict';
-  var motionOK = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var canvas = document.getElementById('glassFoldCanvas');
+  if (!canvas) return;
+  var gl = canvas.getContext('webgl', { antialias: false, alpha: false });
+  if (!gl) { canvas.style.display = 'none'; return; }
 
-  /* FloatingPaths: two mirrored sets (position = +1 and -1) of 36 deterministic
-     cubic-bezier paths, identical to the React reference. Each path has its
-     own strokeWidth and strokeOpacity set inline; the CSS .fp-path animation
-     drives the flowing dash + pulsing opacity loop. */
-  var svg = document.getElementById('bgPaths');
-  if (svg) {
-    var NS = 'http://www.w3.org/2000/svg';
-    var N = 36;
-
-    function addPaths(position) {
-      for (var i = 0; i < N; i++) {
-        var a = 380 - i * 5 * position;
-        var b = 189 + i * 6;
-        var c = 312 - i * 5 * position;
-        var d2 = 216 - i * 6;
-        var e = 152 - i * 5 * position;
-        var f = 343 - i * 6;
-        var g = 616 - i * 5 * position;
-        var h = 470 - i * 6;
-        var j = 684 - i * 5 * position;
-        var k = 875 - i * 6;
-        var d = 'M-' + a + ' -' + b +
-                'C-' + a + ' -' + b + ' -' + c + ' ' + d2 + ' ' + e + ' ' + f +
-                'C' + g + ' ' + h + ' ' + j + ' ' + k + ' ' + j + ' ' + k;
-        var p = document.createElementNS(NS, 'path');
-        p.setAttribute('d', d);
-        p.setAttribute('pathLength', '1');
-        p.setAttribute('class', 'fp-path');
-        p.setAttribute('stroke-width', (0.5 + i * 0.03).toFixed(3));
-        p.setAttribute('stroke-opacity', (0.1 + i * 0.03).toFixed(3));
-        if (motionOK) {
-          var dur = 20 + Math.random() * 10;
-          p.style.animationDuration = dur.toFixed(2) + 's';
-          p.style.animationDelay = (-Math.random() * dur).toFixed(2) + 's';
-        }
-        svg.appendChild(p);
-      }
-    }
-    addPaths(1);
-    addPaths(-1);
-
-    /* Pause the animation when the hero is off-screen (performance NFR). */
-    if ('IntersectionObserver' in window) {
-      new IntersectionObserver(function (es) { svg.classList.toggle('paused', !es[0].isIntersecting); }).observe(document.querySelector('.hero'));
-    }
+  var vertex = 'attribute vec2 position; varying vec2 vUv; void main(){vUv=position*.5+.5;gl_Position=vec4(position,0.,1.);}';
+  var fragment = [
+    'precision highp float;',
+    'uniform float u_time,u_scale,u_noise; uniform vec3 u_color1,u_color2,u_color3; uniform vec2 u_resolution;',
+    'varying vec2 vUv;',
+    'float grain(vec2 st){return fract(sin(dot(st,vec2(12.9898,78.233)))*43758.5453);}',
+    'mat2 rot(float a){float s=sin(a),c=cos(a);return mat2(c,-s,s,c);}',
+    'vec2 centered(vec2 uv){vec2 p=uv-.5;p.x*=u_resolution.x/max(u_resolution.y,1.);return p;}',
+    'vec3 shade(vec2 uv){vec2 q=rot(.6)*centered(uv)*2.*u_scale;float t=u_time*.6;float px=2.*u_scale/max(u_resolution.y,1.);',
+    'vec3 color=mix(u_color2,u_color2*.45,clamp(length(centered(uv))*1.3,0.,1.));',
+    'for(int i=0;i<6;i++){float fi=float(i),bend=mod(fi,2.)*2.-1.;',
+    'float crease=(fi-2.5)*.4+.26*sin(q.x*(1.05+.12*fi)+fi*1.9+t*(.25+.05*fi))+.1*bend*q.x*q.x;',
+    'float s=q.y-crease,pane=smoothstep(-px,px,s),back=max(s,0.),body=exp(-back*1.7),fresnel=exp(-back*8.),rim=exp(-back*80.),inner=exp(-pow((back-.045)/.014,2.)),bloom=exp(-abs(s)*20.);',
+    'vec3 tint=mix(u_color1,u_color3,clamp(fresnel*.6+.08+.14*sin(fi*2.1+q.x*.8+t*.2),0.,1.));',
+    'vec3 light=tint*pane*(body*.24+fresnel*.16)+u_color3*(pane*(rim*.16+inner*.035)+bloom*.025);color+=light*(1.-color);}',
+    'return clamp(color,0.,1.);}',
+    'void main(){vec3 color=shade(vUv);if(u_noise>.001){float g=grain(vUv*200.+u_time*.1);color*=1.-u_noise*.4+u_noise*g*.4;}gl_FragColor=vec4(color,1.);}'
+  ].join('');
+  function shader(type, source) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, source); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); gl.deleteShader(s); return null; }
+    return s;
   }
-
-  /* Letter-by-letter title reveal (skipped under prefers-reduced-motion). */
-  var h = document.getElementById('heroTitle');
-  if (h) {
-    if (motionOK) {
-      try {
-        var idx = 0;
-        (function walk(node) {
-          Array.prototype.slice.call(node.childNodes).forEach(function (child) {
-            if (child.nodeType === 3) {
-              var frag = document.createDocumentFragment(), ch;
-              child.textContent.split('').forEach(function (c) {
-                if (c === ' ') { frag.appendChild(document.createTextNode(' ')); return; }
-                ch = document.createElement('span'); ch.className = 'ch'; ch.textContent = c;
-                ch.style.setProperty('--i', idx++); frag.appendChild(ch);
-              });
-              node.replaceChild(frag, child);
-            } else if (child.nodeType === 1) walk(child);
-          });
-        })(h);
-      } catch (e) { /* non-fatal: title shows un-animated */ }
-    }
-    h.classList.add('ready');
-  }
+  var vs = shader(gl.VERTEX_SHADER, vertex), fs = shader(gl.FRAGMENT_SHADER, fragment);
+  if (!vs || !fs) { canvas.style.display = 'none'; return; }
+  var program = gl.createProgram();
+  gl.attachShader(program, vs); gl.attachShader(program, fs); gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) { console.error(gl.getProgramInfoLog(program)); canvas.style.display = 'none'; return; }
+  gl.useProgram(program);
+  var buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+  var position = gl.getAttribLocation(program, 'position');
+  gl.enableVertexAttribArray(position); gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+  var u = { time:gl.getUniformLocation(program,'u_time'), color1:gl.getUniformLocation(program,'u_color1'), color2:gl.getUniformLocation(program,'u_color2'), color3:gl.getUniformLocation(program,'u_color3'), scale:gl.getUniformLocation(program,'u_scale'), noise:gl.getUniformLocation(program,'u_noise'), resolution:gl.getUniformLocation(program,'u_resolution') };
+  function color(hex) { var n=parseInt(hex.replace('#',''),16); return [((n>>16)&255)/255,((n>>8)&255)/255,(n&255)/255]; }
+  var c1=color('#0B1240'), c2=color('#050817'), c3=color('#34558F'), elapsed=0, last=null, active=true, frame=0;
+  function resize() { var dpr=Math.min(window.devicePixelRatio||1,2),w=Math.max(1,Math.round(canvas.clientWidth*dpr)),h=Math.max(1,Math.round(canvas.clientHeight*dpr)); if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;} gl.viewport(0,0,w,h); }
+  function draw(now) { if(last!==null) elapsed+=Math.min((now-last)/1000,.1)*.42; last=now; resize(); gl.uniform1f(u.time,elapsed); gl.uniform3fv(u.color1,c1); gl.uniform3fv(u.color2,c2); gl.uniform3fv(u.color3,c3); gl.uniform1f(u.scale,1); gl.uniform1f(u.noise,.08); gl.uniform2f(u.resolution,canvas.width,canvas.height); gl.drawArrays(gl.TRIANGLES,0,6); }
+  var reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function loop(now) { if(active) draw(now); if(!reduced) frame=requestAnimationFrame(loop); }
+  draw(performance.now());
+  frame=requestAnimationFrame(loop);
+  if ('IntersectionObserver' in window) new IntersectionObserver(function(es){active=es[0].isIntersecting; if(active) last=null;}).observe(document.querySelector('.hero'));
+  window.addEventListener('resize', resize, { passive:true });
 })();
 
 document.addEventListener('DOMContentLoaded', function () {
